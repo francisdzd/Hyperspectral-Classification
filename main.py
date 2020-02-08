@@ -27,7 +27,7 @@ from skimage import io
 # Visualization
 import seaborn as sns
 import visdom
-
+import datetime
 import os
 from utils import metrics, convert_to_color_, convert_from_color_,\
     display_dataset, display_predictions, explore_spectrums, plot_spectrums,\
@@ -35,6 +35,7 @@ from utils import metrics, convert_to_color_, convert_from_color_,\
 from datasets import get_dataset, HyperX, open_file, DATASETS_CONFIG
 from models import get_model, train, test, save_model
 
+import joblib
 import argparse
 
 dataset_names = [v['name'] if 'name' in v.keys() else k for k, v in DATASETS_CONFIG.items()]
@@ -152,6 +153,7 @@ TRAIN_GT = args.train_set
 TEST_GT = args.test_set
 TEST_STRIDE = args.test_stride
 
+
 if args.download is not None and len(args.download) > 0:
     for dataset in args.download:
         get_dataset(dataset, target_folder=FOLDER)
@@ -225,7 +227,6 @@ for run in range(N_RUNS):
                                                  np.count_nonzero(gt)))
     print("Running an experiment with the {} model".format(MODEL),
           "run {}/{}".format(run + 1, N_RUNS))
-
     display_predictions(convert_to_color(train_gt), viz, caption="Train ground truth")
     display_predictions(convert_to_color(test_gt), viz, caption="Test ground truth")
 
@@ -281,7 +282,7 @@ for run in range(N_RUNS):
         if CLASS_BALANCING:
             weights = compute_imf_weights(train_gt, N_CLASSES, IGNORED_LABELS)
             hyperparams['weights'] = torch.from_numpy(weights)
-        # Split train set in train/val
+        #todo: Split train set in train/val
         train_gt, val_gt = sample_gt(train_gt, 0.95, mode='random')
         # Generate the dataset
         train_dataset = HyperX(img, train_gt, **hyperparams)
@@ -295,6 +296,7 @@ for run in range(N_RUNS):
                                      batch_size=hyperparams['batch_size'])
 
         print(hyperparams)
+        viz.text(datetime.datetime.now().strftime('%Y-%m-%d %H:%M \\n')+str(hyperparams))# TODO:test to show hyperparams
         print("Network :")
         with torch.no_grad():
             for input, _ in train_loader:
@@ -304,6 +306,17 @@ for run in range(N_RUNS):
 
         if CHECKPOINT is not None:
             model.load_state_dict(torch.load(CHECKPOINT))
+            #加载上一次的训练数据、验证数据
+            if os.path.isfile('sample_data_file'):
+                sample_data_file = joblib.load('sample_data_file.joblib')
+                train_loader = sample_data_file[0]
+                val_loader = sample_data_file[1]
+
+        else:
+            sample_data_file = [train_loader, val_loader]
+            joblib.dump(sample_data_file, 'sample_data_file.joblib')
+            del sample_data_file
+
 
         try:
             train(model, optimizer, loss, train_loader, hyperparams['epoch'],
