@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 import random
 import numpy as np
@@ -13,6 +14,7 @@ import imageio
 import os
 import re
 import torch
+import datetime
 
 def get_device(ordinal):
     # Use GPU ?
@@ -345,7 +347,7 @@ def metrics(prediction, target, ignored_labels=[], n_classes=None):
 
 
 def show_results(results, vis, label_values=None, agregated=False):
-    text = ""
+    text = datetime.datetime.now().strftime('%Y-%m-%d %H:%M \\n')
 
     if agregated:
         accuracies = [r["Accuracy"] for r in results]
@@ -363,7 +365,8 @@ def show_results(results, vis, label_values=None, agregated=False):
         kappa = results["Kappa"]
 
     #label_values = label_values[1:]
-    vis.heatmap(cm, opts={'title': "Confusion matrix", 
+    vis.heatmap(cm, opts={'time:': datetime.datetime.now().strftime('%Y-%m-%d %H:%M \\n'),
+                          'title': "Confusion matrix",
                           'marginbottom': 150,
                           'marginleft': 150,
                           'width': 500,
@@ -459,6 +462,7 @@ def sample_gt(gt, train_size, mode='random'):
             train_gt[mask] = 0
 
         test_gt[train_gt > 0] = 0
+
     else:
         raise ValueError("{} sampling is not implemented yet.".format(mode))
     return train_gt, test_gt
