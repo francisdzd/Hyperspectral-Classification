@@ -27,14 +27,15 @@ from skimage import io
 # Visualization
 import seaborn as sns
 import visdom
-
+import datetime
 import os
 from utils import metrics, convert_to_color_, convert_from_color_,\
     display_dataset, display_predictions, explore_spectrums, plot_spectrums,\
-    sample_gt, build_dataset, show_results, compute_imf_weights, get_device
+    sample_gt, build_dataset, show_results, compute_imf_weights, get_device,camel_to_snake
 from datasets import get_dataset, HyperX, open_file, DATASETS_CONFIG
 from models import get_model, train, test, save_model
 
+import joblib
 import argparse
 
 dataset_names = [v['name'] if 'name' in v.keys() else k for k, v in DATASETS_CONFIG.items()]
@@ -152,6 +153,7 @@ TRAIN_GT = args.train_set
 TEST_GT = args.test_set
 TEST_STRIDE = args.test_stride
 
+
 if args.download is not None and len(args.download) > 0:
     for dataset in args.download:
         get_dataset(dataset, target_folder=FOLDER)
@@ -225,7 +227,6 @@ for run in range(N_RUNS):
                                                  np.count_nonzero(gt)))
     print("Running an experiment with the {} model".format(MODEL),
           "run {}/{}".format(run + 1, N_RUNS))
-
     display_predictions(convert_to_color(train_gt), viz, caption="Train ground truth")
     display_predictions(convert_to_color(test_gt), viz, caption="Test ground truth")
 
@@ -281,8 +282,22 @@ for run in range(N_RUNS):
         if CLASS_BALANCING:
             weights = compute_imf_weights(train_gt, N_CLASSES, IGNORED_LABELS)
             hyperparams['weights'] = torch.from_numpy(weights)
-        # Split train set in train/val
-        train_gt, val_gt = sample_gt(train_gt, 0.95, mode='random')
+        #todo: Split train set in train/val
+        # train_gt,val_gt=sample_gt(train_gt,0.95,mode='random')
+        val_gt, test_gt = sample_gt(test_gt, 0.1, mode='random')
+        # save train_gt val_gt test_gt for next trainning if load checkpoint
+        if CHECKPOINT is not None:
+            model.load_state_dict(torch.load(CHECKPOINT))
+            #加载上一次的训练数据、验证数据
+            if os.path.isfile(MODEL+'-'+DATASET+'-sample_data_file.joblib'):
+                sample_data_file = joblib.load(MODEL+'-'+DATASET+'-sample_data_file.joblib')
+                train_gt = sample_data_file[0]
+                val_gt = sample_data_file[1]
+                test_gt=sample_data_file[2]
+        else:
+            sample_data_file = [train_gt, val_gt,test_gt]
+            joblib.dump(sample_data_file, MODEL+'-'+DATASET+'-sample_data_file.joblib')
+            del sample_data_file
         # Generate the dataset
         train_dataset = HyperX(img, train_gt, **hyperparams)
         train_loader = data.DataLoader(train_dataset,
@@ -293,8 +308,8 @@ for run in range(N_RUNS):
         val_loader = data.DataLoader(val_dataset,
                                      #pin_memory=hyperparams['device'],
                                      batch_size=hyperparams['batch_size'])
-
         print(hyperparams)
+        viz.text(datetime.datetime.now().strftime('%Y-%m-%d %H:%M ')+str(hyperparams))# TODO:test to show hyperparams
         print("Network :")
         with torch.no_grad():
             for input, _ in train_loader:
@@ -302,8 +317,19 @@ for run in range(N_RUNS):
             #summary(model.to(hyperparams['device']), input.size()[1:], device=hyperparams['device'])
             summary(model.to(hyperparams['device']), input.size()[1:])
 
-        if CHECKPOINT is not None:
-            model.load_state_dict(torch.load(CHECKPOINT))
+        # if CHECKPOINT is not None:
+        #     model.load_state_dict(torch.load(CHECKPOINT))
+        #     #加载上一次的训练数据、验证数据
+        #     if os.path.isfile(MODEL+'-'+DATASET+'-sample_data_file.joblib'):
+        #         sample_data_file = joblib.load(MODEL+'-'+DATASET+'-sample_data_file.joblib')
+        #         train_loader = sample_data_file[0]
+        #         val_loader = sample_data_file[1]
+        #         test_gt=sample_data_file[2]
+        # else:
+        #     sample_data_file = [train_loader, val_loader,test_gt]
+        #     joblib.dump(sample_data_file, MODEL+'-'+DATASET+'-sample_data_file.joblib')
+        #     del sample_data_file
+
 
         try:
             train(model, optimizer, loss, train_loader, hyperparams['epoch'],
@@ -318,6 +344,10 @@ for run in range(N_RUNS):
         prediction = np.argmax(probabilities, axis=-1)
 
     run_results = metrics(prediction, test_gt, ignored_labels=hyperparams['ignored_labels'], n_classes=N_CLASSES)
+    # save test acc to txt
+    with open('./checkpoints/' + camel_to_snake(str(model.__class__.__name__)) + '/' + DATASET + '/test_acc.txt','a') as f:
+        f.writelines(datetime.datetime.now().strftime('%Y-%m-%d %H:%M ') + 'train-results' + ' acc:{} \n'.format(run_results['Accuracy']))
+        f.close()
 
     mask = np.zeros(gt.shape, dtype='bool')
     for l in IGNORED_LABELS:
